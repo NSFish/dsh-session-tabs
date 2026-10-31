@@ -333,6 +333,26 @@ test('top panel controls relay native clicks, track native state and restore ori
   f.window.__dshSessionTabs.enable(false);assert.equal(bottom.hasAttribute('data-dsh-session-tabs-native-hidden'),false);assert.equal(right.hasAttribute('data-dsh-session-tabs-native-hidden'),false);
   f.window.__dshSessionTabs.enable(true);f.ctx.dispose();assert.equal(bottom.hasAttribute('data-dsh-session-tabs-native-hidden'),false);assert.equal(right.hasAttribute('data-dsh-session-tabs-native-hidden'),false);
 });
+test('panel proxies copy the whole glyph container so an inline rotation survives the clone',()=>{
+  // dsh-better-sidebar draws the bottom toggle as the left-panel svg wrapped in a span whose
+  // inline style carries rotate(-90deg). Cloning just the svg silently drops that rotation and
+  // the proxy renders a sideways glyph — the exact symptom reported against 0.1.7-fork.1.
+  let bottom,right;
+  const f=mounted(dom=>{
+    bottom=dom.doc.createElement('button');bottom.setAttribute('data-dsh-bottom-toggle','');bottom.setAttribute('aria-label','展开底部面板');
+    const wrapper=dom.doc.createElement('span');wrapper.style.transform='rotate(-90deg)';wrapper.style.display='inline-flex';
+    wrapper.append(dom.doc.createElement('svg'));bottom.append(wrapper);
+    right=dom.doc.createElement('button');right.setAttribute('data-sidebar-right-expand','');right.setAttribute('aria-label','打开右侧边栏');
+    right.append(dom.doc.createElement('svg'));dom.native.append(bottom,right);
+  });
+  const host=f.dom.center.firstChild,b=host.querySelector('[data-dsst-action="bottom"]'),r=host.querySelector('[data-dsst-action="right"]');
+  const glyph=b.firstChild;
+  assert.equal(glyph.tagName,'SPAN','the rotated wrapper, not the bare svg, must be cloned');
+  assert.equal(glyph.style.transform,'rotate(-90deg)','dropping this transform is the reported bug');
+  assert.ok(glyph.querySelector('svg'),'the wrapper still carries the native panel mark');
+  assert.equal(r.firstChild.tagName,'SVG','a rotation-free glyph is still cloned as the svg itself');
+  assert.notEqual(r.firstChild,right.firstChild);f.ctx.dispose();
+});
 test('expanded right sidebar keeps only its native edge toggle and restores the opener after collapse',()=>{
   let expand,collapse,domRef;
   const f=mounted(dom=>{

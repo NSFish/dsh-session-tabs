@@ -180,6 +180,7 @@ mock DOM 的缺口会同时造成假阳性和假阴性，本次踩到四个：
 | 没有 `getBoundingClientRect()` | 拖动逻辑读到 undefined，静默走错分支 |
 | `querySelector` 只匹配**单个**属性选择器 | `[data-dsst-tab][data-active=true]` 恒为 null，测试以为没有激活标签 |
 | 布局不会自动流动 | 手工塞 `_rect` 时漏字段（如 `right`），`width` 算出 `NaN` |
+| `cloneNode` 不复制 `style` | 真实 `cloneNode` 会复制 inline style；夹具丢掉了，于是「克隆保住了旋转」测不出来 |
 
 修法是把夹具做成**够真**：节点带 `style`；父容器标了 `_flowX` 就按子元素顺序自动算
 位置，并叠加子元素自己的 `translateX`；所有矩形都从 `left + width` 推导，不读别人给的
@@ -202,3 +203,35 @@ node --test test/verify.mjs        # 逻辑层：全绿
 4. 装饰（接缝）在拖动中**跟着走**、松手后**仍对齐**（`joinLeft === cellLeft`）。
 
 以及反向拖动：往回拖必须原样退回，不能单向卡住。
+
+## 七、代理控件：只克隆 `svg` 会丢掉旋转
+
+本插件把原生的两个面板按钮换成自己画的代理按钮，图标是克隆原生按钮里的 `svg`。
+底部面板的图标因此**少了 90° 旋转**，显示成一个侧躺的左侧栏图标；右侧那个却正常。
+
+原因是两个图标的做法不一样：
+
+- 右侧 opener 的镜像（`scaleX(-1)`）写在 svg 自己的 class 上，克隆 svg 就带走了；
+- 底部开关的旋转写在 svg **外层 span 的 inline `style`** 上
+  （`dsh-better-sidebar/src/client/icons.tsx` 的 `IconPanelBottomOutline16`），
+  React 没法把 `transform` 直接放到 svg 上，所以套了一层。只克隆 svg 等于把这层丢了。
+
+所以图标要克隆的是**承载样式的那个容器**：从原生按钮的子节点里找「等于 svg 或包着 svg」
+的那个，整棵克隆。真实 Chromium 读数：
+
+```
+原生外层 span: inlineTransform=rotate(-90deg)   computed=matrix(0,-1,1,0,0,0)
+代理外层 span: inlineTransform=rotate(-90deg)   computed=matrix(0,-1,1,0,0,0)
+只克隆 svg:    inlineTransform=''                computed=none        ← 原来的 bug
+```
+
+两个连带教训：
+
+1. **样式可能不在你以为的那个节点上。** 「这个按钮的图标」不等于「这个按钮里的 svg」，
+   多一层包装就会漏。改这类地方先看原生 DOM 的形状，不要凭标签名假设。
+2. **尺寸规则要跟着改成直接子元素。** 代理按钮原本写 `.dsst-panel-button[data-dsst-action=bottom] svg{width:16px}`，
+   这会把包装层里那 16px 的 svg 塞进一个 15px 的盒子里，缩放后糊掉。改成 `>svg`：
+   外层由原生自己声明尺寸，内层 svg 不参与。
+
+夹具那边对应补了一条：`cloneNode` 原来不复制 `style`，于是「克隆保住了旋转」根本无法被测出来
+（连 `style.transform` 都读不到）。真实 `cloneNode` 是复制 inline style 的，夹具必须跟上。

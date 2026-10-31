@@ -57,6 +57,20 @@ Real-browser checks covered four invariants: live following, the half-covered sw
 
 The gesture needs no native `draggable`: leaving it on hands the pointer to the browser's HTML5 drag, which stops delivering `pointermove`. See [lessons-drag-reorder.md](lessons-drag-reorder.md) for the traps, the diagnostic order, and the acceptance checklist.
 
+## Fork: bottom-panel proxy glyph (0.1.7-fork.2)
+
+The proxy for the bottom-panel toggle lost its rotation, showing a sideways left-panel mark while the right opener looked correct. Cause: `dsh-better-sidebar` renders the bottom toggle as the shared left-panel `svg` wrapped in a span whose inline style carries `rotate(-90deg)` (React cannot put a transform on the svg itself), and the proxy cloned only the `svg`. The right opener survived because its mirroring is a `scaleX(-1)` class on the svg itself.
+
+The proxy now clones the first child that is, or contains, the svg — i.e. the styled container. Verified in a real Chromium against a page that injects the natives in their native shape:
+
+```
+native wrapper: inline transform rotate(-90deg)  computed matrix(0,-1,1,0,0,0)
+proxy  wrapper: inline transform rotate(-90deg)  computed matrix(0,-1,1,0,0,0)
+bare svg clone: inline transform ''               computed none   (the old behaviour)
+```
+
+The proxy's own size rule was narrowed to `>svg` so the 16px svg inside a 15px wrapper is no longer inflated by the proxy's button rule. The mock fixture's `cloneNode` now copies `style`, because the real one does — without it the regression could not be asserted. All 52 tests pass, including a new one that fails when only the svg is cloned.
+
 
 ## Limits
 

@@ -29,6 +29,7 @@
 9. `ctx.effect` 的 dispose 要清理干净：observer / 定时器 / 样式表 / 监听 / 浮层 / 调试全局。
 10. 改完必须 `node --test test/verify.mjs` 全绿；真实界面用 `node tools/real-ui-check.mjs --global __dshSessionTabs` 验一次。
 11. 拖拽类改动**不能只靠 mock DOM 验收**：手感（跟手、换位时机）必须在真实浏览器里逐点采样屏幕坐标。别在标签上留 `draggable`——它会让浏览器接管手势并停止派发 `pointermove`。细节见 `docs/lessons-drag-reorder.md`。
+12. 克隆原生控件当图标时，**克隆承载样式的容器，不是 svg 本身**：旋转/位移可能写在外层 wrapper 的 inline style 上（`dsh-better-sidebar` 的底部开关就是 `rotate(-90deg)` 套在 span 上），只克隆 `svg` 会静默丢掉它。改完在真实浏览器里比一次 computed transform。
 
 更完整的契约、踩坑库与验收清单见 DSH 的 `dsh-plugin-authoring` skill
 （装好之后：DSH 里 `/dsh-plugin-authoring`，Codex 里 `$dsh-plugin-authoring`；

@@ -21,7 +21,10 @@ export class Node{
   addEventListener(t,fn){if(!this.listeners.has(t))this.listeners.set(t,new Set());this.listeners.get(t).add(fn);}
   removeEventListener(t,fn){this.listeners.get(t)?.delete(fn);}
   click(){this.dispatch('click',{target:this});}
-  cloneNode(deep=false){const n=new Node(this.tagName);n.attrs={...this.attrs};n.className=this.className;n._text=this._text;n.document=this.document;if(deep)this.children.forEach(c=>n.append(c.cloneNode(true)));return n;}
+  // Real cloneNode copies inline style, and the bottom-toggle glyph depends on it: the rotation
+  // lives in a wrapper span's style, not in an attribute. A fixture that dropped it would make
+  // "the clone keeps the rotation" untestable.
+  cloneNode(deep=false){const n=new Node(this.tagName);n.attrs={...this.attrs};n.className=this.className;n._text=this._text;n.document=this.document;n.style={...this.style};if(deep)this.children.forEach(c=>n.append(c.cloneNode(true)));return n;}
   dispatch(t,event){this.listeners.get(t)?.forEach(fn=>fn(event));}
   matches(sel){
     if(sel.startsWith('.'))return this.className.split(' ').includes(sel.slice(1));
