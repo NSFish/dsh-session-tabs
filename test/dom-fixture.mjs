@@ -8,6 +8,13 @@ export class Node{
   get nextSibling(){if(!this.parentNode)return null;return this.parentNode.children[this.parentNode.children.indexOf(this)+1]||null;}
   set textContent(v){this._text=String(v);this.replaceChildren();}
   get textContent(){return this._text+this.children.map(x=>x.textContent).join('');}
+  // Real outerHTML serializes the subtree, and the duplicate-`+` suppression identifies the host
+  // button by its glyph path — without this the lookup silently matches nothing.
+  get outerHTML(){
+    const attrs=Object.entries(this.attrs).map(([k,v])=>v===''?k:k+'="'+v+'"').join(' ');
+    const open='<'+this.tagName.toLowerCase()+(attrs?' '+attrs:'')+'>';
+    return open+this._text+this.children.map(c=>c.outerHTML).join('')+'</'+this.tagName.toLowerCase()+'>';
+  }
   setAttribute(k,v){this.attrs[k]=String(v);}
   getAttribute(k){return this.attrs[k]??null;}
   hasAttribute(k){return Object.hasOwn(this.attrs,k);}

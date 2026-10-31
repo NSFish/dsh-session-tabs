@@ -75,6 +75,32 @@ bare svg clone: inline transform ''               computed none   (the old behav
 
 The proxy's own size rule was narrowed to `>svg` so the 16px svg inside a 15px wrapper is no longer inflated by the proxy's button rule. The mock fixture's `cloneNode` now copies `style`, because the real one does — without it the regression could not be asserted. All 52 tests pass, including a new one that fails when only the svg is cloned.
 
+## Fork: duplicate `+` suppressed (0.1.7-fork.6)
+
+On macOS with the sidebar collapsed, `ui-layout` mounts the frame's `shell.leading` seat (`darwin && sidebarCollapsed`) at `top:11px; left:88px`, and `ui-sidebar`'s `HeaderLeadingControls` occupies it with two buttons: sidebar-toggle and New Session. The strip pads itself by the published `--dsh-frame-leading-clearance` (160px) so it clears that seat — which put the host's New Session button and the strip's own `+` in the same row, both calling `uiWorkspace.startSession()`.
+
+The plugin now hides only the host's New Session button and leaves the sidebar toggle alone, since that toggle is the only way to reopen a collapsed sidebar.
+
+Identification is by glyph, because neither button carries a data attribute and both class names are build-hashed:
+
+```
+New Session    IconNewChatOutlineRegular  bubble outline + M8 5V11 / M5 8H11
+Sidebar toggle IconPanelLeftOutlineRegular panel rect     + M8 1.5V14.5
+```
+
+Matching on `aria-label` was rejected: the label is localized (`新建会话` / `New session`) and would break on a language switch.
+
+Measured in a real Chromium with the seat mounted in its native shape and the real bundle loaded:
+
+```
+strip enabled:      hostNewHidden true   hostNewVisible none    toggleVisible block  stripPlus flex
+strip disabled:     hostNewHidden false  hostNewVisible block   toggleVisible block
+strip re-enabled:   hostNewHidden true   hostNewVisible none    toggleVisible block
+strip + clicked:    uiWorkspace.startSession calls = 1
+```
+
+Native mode, disabling the plugin and disposal all restore the host button. All 42 tests pass, including a new regression that fails if the suppression matches the toggle instead of the duplicate. The mock fixture gained `outerHTML`; without it the glyph match silently found nothing.
+
 ## Fork: `+` earns a tab again (0.1.7-fork.5)
 
 The 0.1.7-fork.1 rule ("a tab is earned, not granted") was right about automatic blank tabs and wrong about the explicit `+`. It hid the fresh 新会话 tab too, so pressing `+` looked like a no-op until the first message was sent. `shown()` now also accepts the blank while it is the session on screen:

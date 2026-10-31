@@ -213,6 +213,37 @@ test('removing options keeps native fallback and strip-local reopen, with IME gu
   assert.equal(f.window.__dshSessionTabs.snapshot().ids.includes(real),true);assert.equal(f.dom.doc.listeners.has('keydown'),false);
   const list=host.querySelector('[role="tablist"]');f.ctx.dispose();assert.equal(list.listeners.get('scroll').size,0);
 });
+test('the host New Session button in the chrome seat is suppressed, its sidebar toggle is kept',()=>{
+  // With the macOS sidebar collapsed the frame mounts `shell.leading`, whose occupant is the
+  // host's own [sidebar toggle, New Session] pair. The strip already offers New Session, so that
+  // row showed two `+` targets. Only the duplicate must go: the toggle is the sole way to reopen
+  // a collapsed sidebar.
+  let seat,hostNew,toggle;
+  const f=mounted(dom=>{
+    seat=dom.doc.createElement('div');seat.setAttribute('data-shell-leading','');
+    // The real glyphs: the New Session icon is a bubble with a plus, the toggle is the panel rect.
+    hostNew=dom.doc.createElement('button');hostNew.setAttribute('aria-label','新建会话');
+    const bubble=dom.doc.createElement('svg');bubble.append(dom.doc.createElement('path'));
+    bubble.firstChild.setAttribute('d','M8 5V11');
+    hostNew.append(bubble);
+    toggle=dom.doc.createElement('button');toggle.setAttribute('aria-label','展开侧栏');
+    const panel=dom.doc.createElement('svg');panel.append(dom.doc.createElement('path'));
+    panel.firstChild.setAttribute('d','M8 1.5V14.5');
+    toggle.append(panel);
+    seat.append(toggle,hostNew);dom.doc.body.append(seat);
+  });
+  assert.equal(hostNew.hasAttribute('data-dsh-session-tabs-native-hidden'),true,'the duplicate + must be hidden');
+  assert.equal(toggle.hasAttribute('data-dsh-session-tabs-native-hidden'),false,'the sidebar toggle must stay usable');
+  // The strip keeps its own New Session control.
+  const plus=f.dom.center.firstChild.querySelector('[data-dsst-action="new"]');assert.equal(plus.hidden,false);
+  // Native mode hands the whole row back to the host.
+  f.window.__dshSessionTabs.enable(false);
+  assert.equal(hostNew.hasAttribute('data-dsh-session-tabs-native-hidden'),false);
+  f.window.__dshSessionTabs.enable(true);
+  assert.equal(hostNew.hasAttribute('data-dsh-session-tabs-native-hidden'),true);
+  f.ctx.dispose();
+  assert.equal(hostNew.hasAttribute('data-dsh-session-tabs-native-hidden'),false,'disposal must restore the host control');
+});
 test('top panel controls relay native clicks, track native state and restore originals',()=>{
   let bottom,right,other,bottomClicks=0,rightClicks=0;
   const f=mounted(dom=>{
