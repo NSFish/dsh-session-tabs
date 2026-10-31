@@ -14,6 +14,7 @@
 | `test/verify.mjs` | 自测：在 mock DOM 上加载**真实产物**（`node --test test/verify.mjs`） |
 | `tools/publish-to-github.mjs` | 走 GitHub REST API 发布（空仓库会自动引导） |
 | `tools/real-ui-check.mjs` | CDP 驱动真实 DSH WebUI 冒烟检查并截图 |
+| `docs/lessons-drag-reorder.md` | 拖动排序的踩坑记录与验收清单（改拖拽交互前先读） |
 
 ## 动手前必须知道的硬约束
 
@@ -27,6 +28,7 @@
 8. 快捷键要躲开输入法组字（`isComposing || keyCode === 229`）；桌面版浮层要 `-webkit-app-region: no-drag`。
 9. `ctx.effect` 的 dispose 要清理干净：observer / 定时器 / 样式表 / 监听 / 浮层 / 调试全局。
 10. 改完必须 `node --test test/verify.mjs` 全绿；真实界面用 `node tools/real-ui-check.mjs --global __dshSessionTabs` 验一次。
+11. 拖拽类改动**不能只靠 mock DOM 验收**：手感（跟手、换位时机）必须在真实浏览器里逐点采样屏幕坐标。别在标签上留 `draggable`——它会让浏览器接管手势并停止派发 `pointermove`。细节见 `docs/lessons-drag-reorder.md`。
 
 更完整的契约、踩坑库与验收清单见 DSH 的 `dsh-plugin-authoring` skill
 （装好之后：DSH 里 `/dsh-plugin-authoring`，Codex 里 `$dsh-plugin-authoring`；

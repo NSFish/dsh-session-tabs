@@ -1,6 +1,6 @@
 // Purpose-limited DOM and injection-aware Context for the actual published bundle.
 export class Node{
-  constructor(tag){this.tagName=tag.toUpperCase();this.children=[];this.attrs={};this.listeners=new Map();this.hidden=false;this.className='';this._text='';this.display='block';}
+  constructor(tag){this.tagName=tag.toUpperCase();this.children=[];this.attrs={};this.listeners=new Map();this.hidden=false;this.className='';this._text='';this.display='block';this.style={};}
   get parentElement(){return this.parentNode||null;}
   get isConnected(){let n=this;while(n.parentNode)n=n.parentNode;return n!==this&&n.tagName==='HTML';}
   get firstChild(){return this.children[0]||null;}
@@ -37,6 +37,22 @@ export class Node{
   }
   querySelector(sel){return this.querySelectorAll(sel)[0]||null;}
   focus(){this.document.activeElement=this;}
+  // Geometry: a container marked `_flowX` lays its children out left to right at `_childWidth`,
+  // like the strip's flex row, and a child's own translateX moves it on screen. That makes the
+  // mock honest about the one thing drag logic reads: where a cell actually sits while floating.
+  getBoundingClientRect(){
+    if(this._rect)return this._rect;
+    const parent=this.parentNode;
+    if(parent&&parent._flowX){
+      const width=parent._childWidth??78,height=parent._rowHeight??40,top=parent._rect?.top??0;
+      const left=(parent._rect?.left??0)+parent.children.indexOf(this)*width;
+      const shift=Number((/(?:translateX|translate3d)\(\s*(-?\d+(?:\.\d+)?)px/.exec(this.style?.transform||'')||[])[1]||0);
+      const x=left+shift;
+      return {left:x,top,width,height,right:x+width,bottom:top+height};
+    }
+    return {left:0,top:0,width:0,height:0,right:0,bottom:0};
+  }
+  setPointerCapture(){}releasePointerCapture(){}
 }
 export function domFixture(){
   const html=new Node('html'),head=new Node('head'),body=new Node('body');html.lang='zh';html.append(head,body);

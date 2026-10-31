@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-tabs",
-  "version": "0.1.6",
+  "version": "0.1.7-fork.1",
   "description": "Single-client session tabs preserving native sidebars and background work",
   "icon": "./icon.svg",
   "type": "module",
@@ -38,14 +38,14 @@
     "test": "node --test test/verify.mjs",
     "publish:github": "node tools/publish-to-github.mjs"
   },
-  "author": "QIN-SMART",
+  "author": "NSFish (fork of QIN-SMART/dsh-session-tabs)",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/QIN-SMART/dsh-session-tabs.git"
+    "url": "git+https://github.com/NSFish/dsh-session-tabs.git"
   },
-  "homepage": "https://github.com/QIN-SMART/dsh-session-tabs#readme",
+  "homepage": "https://github.com/NSFish/dsh-session-tabs#readme",
   "bugs": {
-    "url": "https://github.com/QIN-SMART/dsh-session-tabs/issues"
+    "url": "https://github.com/NSFish/dsh-session-tabs/issues"
   },
   "publishConfig": {
     "access": "public",

@@ -46,6 +46,18 @@ CI runs this suite on Ubuntu, Windows and macOS with Node 22 and 24. This matrix
 - An isolated Electron copy checked native/tab view switching, opening and collapsing the right sidebar, and identical open/collapse control coordinates and dimensions. It loaded the native right sidebar and this plugin; bottom-workbench verification used the Web combination above.
 - Both environments retained one native main view, one tab strip and no iframe. The public image is a crop of the real Web UI with synthetic session names. Private profiles, recordings, authentication URLs and raw evidence stay outside the public source and npm package.
 
+## Fork: pointer drag and blank-session tabs (0.1.7-fork.1)
+
+The drag gesture was rebuilt on 2026-10-31 against a personal macOS desktop install of DSH 0.2.1-rc.5 (Chromium 156). Two behaviours changed, both verified in a real browser rather than only in the mock DOM:
+
+- A dragged tab now floats under the pointer instead of sitting still until it crosses a midpoint. Measured by sampling the DOM order and the tab's on-screen box every 20 px: the tab's left edge tracked the pointer throughout, and the swap fired when its leading edge reached the neighbour's centre (a 60 px drag for equal-width tabs), not after a full tab-width.
+- A blank 新会话 no longer earns a tab. Only a session that is running or awaiting interaction appears; the persisted list is pruned of stale blanks on the next sync.
+
+Real-browser checks covered four invariants: live following, the half-covered swap threshold, no highlight during the gesture (no lift shadow, no hover fill), and the active-tab join tracking the dragged tab (`joinLeft === cellLeft` at every sample) and staying aligned after release. Reverse dragging unwinds the order symmetrically. All 51 actual-bundle tests pass; the four earlier assertions that hard-coded "`+` adds a tab" were rewritten to the new contract.
+
+The gesture needs no native `draggable`: leaving it on hands the pointer to the browser's HTML5 drag, which stops delivering `pointermove`. See [lessons-drag-reorder.md](lessons-drag-reorder.md) for the traps, the diagnostic order, and the acceptance checklist.
+
+
 ## Limits
 
 The center strip uses the stable `data-slot="main"` hook because DSH has no dedicated public tab-strip slot. Host layout/API changes can require a plugin update. All panels continue using native controls; missing optional native controls remain unavailable.

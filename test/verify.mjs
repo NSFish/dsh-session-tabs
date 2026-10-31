@@ -87,8 +87,10 @@ test('close active selects a neighbour; final close creates a blank without read
   f.controller.close('a');assert.ok(f.controller.snapshot().active.startsWith('new'));assert.equal(f.controller.snapshot().ids.includes('a'),false);f.controller.dispose();
 });
 test('new command reopens a closed blank even when native startSession reuses it',()=>{
+  // A blank tab is never shown, so `+` must still land on it: the reopen path navigates to the
+  // reused blank and the strip stays unselected until that session produces work.
   const f=fixture();f.list.value.byId.a.blank=true;f.controller.close('a');assert.equal(f.controller.snapshot().ids.length,0);
-  f.services.uiWorkspace.startSession=()=>{};f.controller.newSession();assert.deepEqual(plain(f.controller.snapshot().ids),['a']);f.controller.dispose();
+  f.services.uiWorkspace.startSession=()=>{};f.controller.newSession();assert.deepEqual(plain(f.controller.snapshot().ids),[]);assert.equal(f.controller.snapshot().active,'a');f.controller.dispose();
 });
 test('reopen and reorder preserve identity and active selection',()=>{
   const f=fixture();f.controller.open('b');f.controller.open('c');f.controller.reorder('c','a');assert.deepEqual(plain(f.controller.snapshot().ids),['c','a','b']);
@@ -125,7 +127,11 @@ test('implementation forbids client cloning, sidebar replacement, global keys an
   assert.doesNotMatch(source,/(?:document|window)\.addEventListener\(['"]keydown/);assert.match(source,/e\.isComposing\|\|e\.keyCode===229/);
   const {plugin}=load();assert.doesNotMatch(plugin.CSS,/[A-Za-z0-9_]{6,}_(?:root|header|frame)/);assert.match(plugin.CSS,/-webkit-app-region:no-drag/);
 });
-function mounted(setup){const f=fixture();f.controller.dispose();const dom=domFixture();setup?.(dom);const {plugin,window}=load(dom.extra);const ctx=new TestContext(f.services,plugin.inject);plugin.apply(ctx);dom.flush();return {...f,dom,plugin,window,ctx};}
+function mounted(setup,opts){const f=fixture(opts);f.controller.dispose();const dom=domFixture();
+  // The strip reads window.localStorage; when a test seeds remembered tabs, back the DOM's
+  // storage with the fixture's map so the plugin sees them at mount time.
+  if(opts&&opts.raw)dom.extra.window.localStorage={getItem:k=>f.values.get(k)||null,setItem:(k,v)=>{f.values.set(k,v);}};
+  setup?.(dom);const {plugin,window}=load(dom.extra);const ctx=new TestContext(f.services,plugin.inject);plugin.apply(ctx);dom.flush();return {...f,dom,plugin,window,ctx};}
 test('actual apply mounts only the center and leaves both native sidebar nodes intact',()=>{
   const f=mounted();assert.equal(f.dom.center.firstChild.getAttribute('data-dsh-session-tabs'),'');assert.equal(f.dom.native.getAttribute('data-dsh-session-tabs-main'),'');
   assert.equal(f.dom.left.textContent,'native left');assert.equal(f.dom.right.textContent,'native right');assert.deepEqual(f.dom.left.attrs,{'data-slot':'sidebar'});assert.deepEqual(f.dom.right.attrs,{'data-slot':'rightbar'});
@@ -271,7 +277,7 @@ test('switching sessions, native view and disposal cancel outstanding restoratio
   for(const action of ['session','native','dispose']){
     const f=scrollScenario({height:600});try{
       f.dom.advance(100);
-      if(action==='session')f.open(f.window.__dshSessionTabs.snapshot().ids.find(id=>id!=='a'));
+      if(action==='session'){f.controller.open('b');f.dom.flush();}
       else if(action==='native')f.window.__dshSessionTabs.enable(false);
       else f.ctx.dispose();
       f.port.scrollTop=25;f.port.scrollHeight=2000;f.dom.advance(2500);
@@ -291,19 +297,24 @@ test('status, title and selection updates preserve tab nodes and focused control
   assert.equal(host.querySelector('[data-dsst-id="a"]'),a);assert.equal(f.dom.doc.activeElement,a);
   f.list.value.byId.a.displayTitle='renamed';f.list.emit();f.dom.flush();assert.equal(a.textContent.includes('renamed'),true);
   host.dispatch('click',{target:plus});assert.equal(host.querySelector('[data-dsst-id="a"]'),a);
-  assert.equal(host.querySelector('[data-dsst-action="new"]'),plus);assert.equal(host.querySelectorAll('[data-dsst-tab]').length,2);
+  // `+` opens a blank session: the strip must keep its node set instead of minting an empty tab.
+  assert.equal(host.querySelector('[data-dsst-action="new"]'),plus);assert.equal(host.querySelectorAll('[data-dsst-tab]').length,1);
+  assert.equal(f.window.__dshSessionTabs.snapshot().active.startsWith('new'),true);
   f.ctx.dispose();
 });
 test('removing options keeps native fallback and strip-local reopen, with IME guarding',()=>{
   const f=mounted(),host=f.dom.center.firstChild,plus=host.querySelector('[data-dsst-action="new"]');
   assert.equal(host.querySelector('[data-dsst-action="menu"]'),null);assert.equal(f.ctx.registrations[0].meta.id,'dsh-session-tabs:mode');
-  host.dispatch('click',{target:plus});const id=f.window.__dshSessionTabs.snapshot().active;
-  host.dispatch('click',{target:host.querySelectorAll('[data-dsst-action="close"]').find(b=>b.getAttribute('data-dsst-id')===id)});
-  assert.equal(f.window.__dshSessionTabs.snapshot().ids.includes(id),false);
+  host.dispatch('click',{target:plus});const blank=f.window.__dshSessionTabs.snapshot().active;
+  assert.equal(f.window.__dshSessionTabs.snapshot().ids.includes(blank),false,'a blank session must not earn a tab');
+  // Close a real tab, then confirm the strip still owns the reopen shortcut for it.
+  const real=f.window.__dshSessionTabs.snapshot().ids[0];
+  host.dispatch('click',{target:host.querySelectorAll('[data-dsst-action="close"]').find(b=>b.getAttribute('data-dsst-id')===real)});
+  assert.equal(f.window.__dshSessionTabs.snapshot().ids.includes(real),false);
   host.dispatch('keydown',{target:plus,key:'T',metaKey:true,shiftKey:true,isComposing:true,preventDefault(){throw Error('IME must not be captured');}});
-  assert.equal(f.window.__dshSessionTabs.snapshot().ids.includes(id),false);
+  assert.equal(f.window.__dshSessionTabs.snapshot().ids.includes(real),false);
   host.dispatch('keydown',{target:plus,key:'T',metaKey:true,shiftKey:true,preventDefault(){}});
-  assert.equal(f.window.__dshSessionTabs.snapshot().active,id);assert.equal(f.dom.doc.listeners.has('keydown'),false);
+  assert.equal(f.window.__dshSessionTabs.snapshot().ids.includes(real),true);assert.equal(f.dom.doc.listeners.has('keydown'),false);
   const list=host.querySelector('[role="tablist"]');f.ctx.dispose();assert.equal(list.listeners.get('scroll').size,0);
 });
 test('top panel controls relay native clicks, track native state and restore originals',()=>{
@@ -372,4 +383,170 @@ test('native panel sources ignore hidden retained session headers',()=>{
     }
   });
   const host=f.dom.center.firstChild;host.dispatch('click',{target:host.querySelector('[data-dsst-action="right"]')});assert.equal(right,1);assert.equal(wrong,0);f.ctx.dispose();
+});
+test('a blank new session never earns a tab, and a discarded one is never resurrected',()=>{
+  const f=fixture({raw:'{"version":1,"enabled":true,"ids":["a","b"],"active":"a"}'});
+  // `+` navigates to a blank session: no tab, but the strip still tracks it as the main view.
+  f.services.uiWorkspace.startSession();f.controller.sync();
+  const blank=f.controller.snapshot().active;assert.equal(f.controller.snapshot().ids.includes(blank),false);
+  assert.equal(f.list.value.byId[blank].blank,true);
+  // Abandoning it (navigating elsewhere) leaves nothing behind, and no later sync revives it.
+  f.controller.open('b');assert.deepEqual(plain(f.controller.snapshot().ids),['a','b']);
+  delete f.list.value.byId[blank];f.list.emit();
+  assert.equal(f.controller.snapshot().ids.includes(blank),false);
+  // First message out: the session stops being blank and only then takes its place in the strip.
+  f.list.value.byId.a.blank=true;f.status.value.set('a',{running:true});f.status.emit();
+  assert.equal(f.controller.snapshot().ids.includes('a'),true,'work in progress must keep its tab');
+  f.controller.dispose();
+});
+test('blank-session retain never loops: one retain per sync, none for the on-screen blank',()=>{
+  const f=fixture();let retains=0;const count=id=>{retains++;return f.services.sessions.retain.bind(null)(id,{source:'dsh-session-tabs'});};
+  f.services.sessions.retain=(id,options)=>{retains++;const row=f.list.value.byId[id];row.retainedBy[options.source]=1;const r={id,released:false,ready:Promise.resolve(),release(){r.released=true;delete row.retainedBy[options.source];f.list.emit();}};return r;};
+  f.services.uiWorkspace.startSession();f.controller.sync();
+  const blank=f.controller.snapshot().active;assert.equal(f.list.value.byId[blank].blank,true);
+  // Several unrelated notifications must not churn a retain/release cycle for the blank session.
+  const before=retains;for(let i=0;i<5;i++)f.list.emit();
+  assert.equal(retains-before<=1,true,'a retained blank must not be re-retained on every notification');
+  assert.equal(f.controller.snapshot().ids.includes(blank),false);
+  f.controller.dispose();
+});
+test('pointer drag reorders live and a travelled press never selects',()=>{
+  const f=mounted(),dom=f.dom,host=dom.center.firstChild;
+  f.controller.open('b');f.controller.open('c');dom.flush();
+  const cells=()=>host.querySelectorAll('[data-dsst-tab]');
+  // Give the three tabs a left-to-right layout: 0-100, 100-200, 200-300.
+  // The fixture lays the list out as a real flex row: 78 px tabs from x=20, so midpoints land
+  // at 59 / 139 / 219. No hand-written rects, so the geometry the drag reads is the real one.
+  const list=host.querySelector('[role="tablist"]');list._flowX=true;list._childWidth=78;list._rowHeight=40;list._rect={left:20,top:0,width:400,height:40};
+  const layout=()=>{};
+  const byId=id=>host.querySelector('[data-dsst-id="'+id+'"]').parentElement;
+  layout();const a=byId('a'),c=byId('c');
+  host.dispatch('pointerdown',{target:a.querySelector('[data-dsst-action="open"]'),button:0,pointerId:1,clientX:50,clientY:14});
+  // A small wobble stays a press.
+  dom.dispatch(a,'pointermove',{pointerId:1,clientX:54,clientY:15});assert.deepEqual(plain(f.window.__dshSessionTabs.snapshot().ids),['a','b','c']);
+  // Past the midpoint of the second tab: it moves while the pointer is still down.
+  dom.dispatch(a,'pointermove',{pointerId:1,clientX:150,clientY:14});dom.flush();layout();
+  assert.deepEqual(plain(f.window.__dshSessionTabs.snapshot().ids),['b','a','c'],'the tab must move under the pointer, not on release');
+  assert.equal(a.getAttribute('data-dragging'),'true');
+  dom.dispatch(a,'pointermove',{pointerId:1,clientX:280,clientY:14});dom.flush();layout();
+  assert.deepEqual(plain(f.window.__dshSessionTabs.snapshot().ids),['b','c','a']);
+  dom.dispatch(a,'pointerup',{pointerId:1});
+  assert.equal(a.hasAttribute('data-dragging'),false);
+  // The click that follows the release (same task, before any timer) must not re-open the tab.
+  const before=f.calls.filter(x=>x[0]==='open').length;
+  host.dispatch('click',{target:a.querySelector('[data-dsst-action="open"]')});
+  assert.equal(f.calls.filter(x=>x[0]==='open').length,before,'a drag must not be read as a selection');
+  dom.flush();
+  // A plain press still selects.
+  const b=byId('b');
+  host.dispatch('pointerdown',{target:b.querySelector('[data-dsst-action="open"]'),button:0,pointerId:2,clientX:50,clientY:14});
+  host.dispatch('click',{target:b.querySelector('[data-dsst-action="open"]')});dom.flush();
+  assert.equal(f.window.__dshSessionTabs.snapshot().active,'b');
+  f.ctx.dispose();
+});
+test('no native drag is armed on the tabs, and a stray one is refused',()=>{
+  const f=mounted(),dom=f.dom,host=dom.center.firstChild;
+  const cell=host.querySelector('[data-dsst-tab]');
+  // `draggable` would hand the gesture to the browser's HTML5 drag and stop pointermove.
+  assert.equal(cell.hasAttribute('draggable'),false);
+  let prevented=false;const ev={target:cell,preventDefault(){prevented=true;}};
+  host.dispatch('dragstart',ev);assert.equal(prevented,true,'a native drag inside the strip must be refused');
+  f.ctx.dispose();
+});
+test('the dragged cell moves in the same task as the pointer, not on the next render',()=>{
+  const f=mounted(),dom=f.dom,host=dom.center.firstChild;
+  f.controller.open('b');f.controller.open('c');dom.flush();
+  const cells=()=>host.querySelectorAll('[data-dsst-tab]');
+  // The fixture lays the list out as a real flex row: 78 px tabs from x=20, so midpoints land
+  // at 59 / 139 / 219. No hand-written rects, so the geometry the drag reads is the real one.
+  const list=host.querySelector('[role="tablist"]');list._flowX=true;list._childWidth=78;list._rowHeight=40;list._rect={left:20,top:0,width:400,height:40};
+  const layout=()=>{};
+  const order=()=>[...cells()].map(c=>c.getAttribute('data-dsst-tab'));
+  const a=host.querySelector('[data-dsst-id="a"]').parentElement;
+  layout();
+  host.dispatch('pointerdown',{target:a.querySelector('[data-dsst-action="open"]'),button:0,pointerId:1,clientX:50,clientY:14});
+  // No flush() on purpose: the DOM must already be reordered before any timer runs.
+  // a starts at 20..98 and b at 100..178, so b's centre is 139: moving the pointer 50 px puts
+  // a's right edge (148) past it, which is the half-covered threshold.
+  dom.dispatch(a,'pointermove',{pointerId:1,clientX:100,clientY:14});
+  assert.deepEqual(order(),['b','a','c'],'the cell must move synchronously, without waiting for the render timer');
+  // The dragged tab must also follow the pointer, not sit still until it crosses a midpoint.
+  assert.match(a.style.transform,/^translateX\(/,'the dragged cell must float onto the pointer');
+  assert.deepEqual(plain(f.window.__dshSessionTabs.snapshot().ids),['b','a','c'],'state and DOM must agree');
+  dom.dispatch(a,'pointermove',{pointerId:1,clientX:280,clientY:14});
+  assert.deepEqual(order(),['b','c','a']);
+  dom.dispatch(a,'pointerup',{pointerId:1});
+  dom.flush();
+  assert.deepEqual(order(),['b','c','a'],'a completed render must not undo the drag order');
+  f.ctx.dispose();
+});
+test('the swap fires when half the neighbour is covered, not after a full tab-width',()=>{
+  const f=mounted(),dom=f.dom,host=dom.center.firstChild;
+  f.controller.open('b');f.controller.open('c');dom.flush();
+  const list=host.querySelector('[role="tablist"]');list._flowX=true;list._childWidth=78;list._rowHeight=40;list._rect={left:20,top:0,width:400,height:40};
+  const order=()=>[...host.querySelectorAll('[data-dsst-tab]')].map(c=>c.getAttribute('data-dsst-tab'));
+  const a=host.querySelector('[data-dsst-id="a"]').parentElement;
+  host.dispatch('pointerdown',{target:a.querySelector('[data-dsst-action="open"]'),button:0,pointerId:1,clientX:59,clientY:14});
+  // a is 20..98, b is 100..178 (centre 139); the press is at 59, so a follows the pointer 1:1.
+  // +35 px puts a at 55..133 — its right edge is still short of b's centre.
+  dom.dispatch(a,'pointermove',{pointerId:1,clientX:94,clientY:14});
+  assert.deepEqual(order(),['a','b','c'],'a must not swap before its right edge passes b\'s centre');
+  // +42 px puts a at 62..140 — the right edge is past b's centre, half of b is covered.
+  dom.dispatch(a,'pointermove',{pointerId:1,clientX:101,clientY:14});
+  assert.deepEqual(order(),['b','a','c'],'a must swap once half of b is covered');
+  // Dragging back uses the LEFT edge as the leading one. At x=59 a sits at 20..98 again, so its
+  // left edge is well left of b's centre and it belongs in front of b once more.
+  dom.dispatch(a,'pointermove',{pointerId:1,clientX:59,clientY:14});
+  assert.deepEqual(order(),['a','b','c'],'dragging back must restore the original order');
+  dom.dispatch(a,'pointerup',{pointerId:1});dom.flush();
+  f.ctx.dispose();
+});
+test('the active-tab join tracks its tab while it is dragged, and stays placed on release',()=>{
+  // Mounted with three remembered tabs so there is a real active tab to drag.
+  const f=mounted(null,{raw:'{"version":1,"enabled":true,"ids":["a","b","c"],"active":"a"}'});
+  const dom=f.dom,host=dom.center.firstChild;
+  const list=host.querySelector('[role="tablist"]');list._flowX=true;list._childWidth=78;list._rowHeight=40;list._rect={left:20,top:7,width:400,height:40};
+  const strip=host.querySelector('.dsst-strip');strip._rect={left:0,top:0,width:400,height:47};
+  const join=host.querySelector('.dsst-join');
+  // Geometry is assigned after mount, so re-place the join once the strip knows its box.
+  dom.flush();f.window.__dshSessionTabs.enable(false);dom.flush();f.window.__dshSessionTabs.enable(true);dom.flush();
+  // The mock DOM matches one attribute at a time, so resolve the active cell by filtering.
+  const a=[...host.querySelectorAll('[data-dsst-tab]')].find(cell=>cell.getAttribute('data-active')==='true');
+  assert.ok(a,'an active tab must exist');
+  assert.equal(join.hidden,false,'the join is drawn under the active tab at rest');
+  const pressX=a.getBoundingClientRect().left+20;
+  host.dispatch('pointerdown',{target:a.querySelector('[data-dsst-action="open"]'),button:0,pointerId:1,clientX:pressX,clientY:14});
+  dom.dispatch(a,'pointermove',{pointerId:1,clientX:pressX+51,clientY:14});dom.flush();
+  assert.equal(a.getAttribute('data-dragging'),'true','the active tab must be the one being dragged');
+  // The join belongs to the active tab, so while that tab is the one being dragged it travels
+  // with it instead of being hidden or left behind.
+  assert.equal(join.hidden,false,'the join stays drawn while its own tab is dragged');
+  const cellBox=a.getBoundingClientRect(),stripBox=strip.getBoundingClientRect();
+  const left=parseFloat(join.style.left),width=parseFloat(join.style.width);
+  assert.equal(Number.isNaN(left),false,'the join must have a real left offset while dragging');
+  assert.ok(Math.abs(left-(cellBox.left-stripBox.left))<1,'the join must track the dragged tab: '+left+' vs '+(cellBox.left-stripBox.left));
+  assert.ok(Math.abs(width-cellBox.width)<1,'the join must keep the tab width: '+width+' vs '+cellBox.width);
+  dom.dispatch(a,'pointerup',{pointerId:1});dom.flush();
+  assert.equal(join.hidden,false,'release must keep the join placed');
+  assert.equal(a.style.transform,'','release must drop the float');
+  f.ctx.dispose();
+});
+test('a dragged tab is not highlighted: no lift shadow and no hover fill',()=>{
+  const f=mounted(),dom=f.dom,host=dom.center.firstChild;
+  f.controller.open('b');f.controller.open('c');dom.flush();
+  const list=host.querySelector('[role="tablist"]');list._flowX=true;list._childWidth=78;list._rowHeight=40;list._rect={left:20,top:7,width:400,height:40};
+  const a=host.querySelector('[data-dsst-id="a"]').parentElement;
+  host.dispatch('pointerdown',{target:a.querySelector('[data-dsst-action="open"]'),button:0,pointerId:1,clientX:59,clientY:14});
+  dom.dispatch(a,'pointermove',{pointerId:1,clientX:110,clientY:14});
+  assert.equal(a.getAttribute('data-dragging'),'true');
+  // The CSS contract, asserted on the injected stylesheet: the hover fill is suppressed and the
+  // lift shadow is gone, because the pointer stays over the tab for the whole gesture.
+  const {plugin}=load();
+  const dragging = plugin.CSS.split('\n').find(line => line.startsWith('.dsst-tab[data-dragging=true]{'));
+  assert.ok(dragging, 'the dragged-tab rule must exist');
+  assert.equal(dragging.includes('box-shadow:none'), true, 'the lift shadow must be gone');
+  assert.equal(dragging.includes('box-shadow:0 3px'), false, 'no shadow may remain');
+  assert.ok(plugin.CSS.includes('.dsst-tab[data-dragging=true]::before{display:none!important;background:none!important}'), 'the hover fill must be suppressed while dragging');
+  dom.dispatch(a,'pointerup',{pointerId:1});dom.flush();
+  f.ctx.dispose();
 });
