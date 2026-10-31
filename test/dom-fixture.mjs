@@ -1,6 +1,13 @@
 // Purpose-limited DOM and injection-aware Context for the actual published bundle.
+// Inline style with the CSSOM surface the bundle actually uses. A bare object would throw on
+// setProperty, and the failure surfaces as a confusing "null !== ''" further downstream.
+function cssStyle(){
+  const props=new Map();
+  const api={getPropertyValue:k=>props.get(k)??'',setProperty:(k,v)=>{props.set(String(k),String(v));},removeProperty:k=>{const v=props.get(k)??'';props.delete(k);return v;},_props:props};
+  return new Proxy(api,{get(t,k){if(k in t)return t[k];return props.get(String(k))??'';},set(t,k,v){if(k in t){t[k]=v;return true;}props.set(String(k),String(v));return true;},deleteProperty(t,k){props.delete(String(k));return true;},has(t,k){return k in t||props.has(String(k));}});
+}
 export class Node{
-  constructor(tag){this.tagName=tag.toUpperCase();this.children=[];this.attrs={};this.listeners=new Map();this.hidden=false;this.className='';this._text='';this.display='block';this.style={};}
+  constructor(tag){this.tagName=tag.toUpperCase();this.children=[];this.attrs={};this.listeners=new Map();this.hidden=false;this.className='';this._text='';this.display='block';this.style=cssStyle();}
   get parentElement(){return this.parentNode||null;}
   get isConnected(){let n=this;while(n.parentNode)n=n.parentNode;return n!==this&&n.tagName==='HTML';}
   get firstChild(){return this.children[0]||null;}
@@ -31,7 +38,7 @@ export class Node{
   // Real cloneNode copies inline style, and the bottom-toggle glyph depends on it: the rotation
   // lives in a wrapper span's style, not in an attribute. A fixture that dropped it would make
   // "the clone keeps the rotation" untestable.
-  cloneNode(deep=false){const n=new Node(this.tagName);n.attrs={...this.attrs};n.className=this.className;n._text=this._text;n.document=this.document;n.style={...this.style};if(deep)this.children.forEach(c=>n.append(c.cloneNode(true)));return n;}
+  cloneNode(deep=false){const n=new Node(this.tagName);n.attrs={...this.attrs};n.className=this.className;n._text=this._text;n.document=this.document;n.style=cssStyle();if(this.style?._props)for(const [k,v] of this.style._props)n.style.setProperty(k,v);if(deep)this.children.forEach(c=>n.append(c.cloneNode(true)));return n;}
   dispatch(t,event){this.listeners.get(t)?.forEach(fn=>fn(event));}
   matches(sel){
     if(sel.startsWith('.'))return this.className.split(' ').includes(sel.slice(1));

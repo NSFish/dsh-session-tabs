@@ -244,6 +244,32 @@ test('the host New Session button in the chrome seat is suppressed, its sidebar 
   f.ctx.dispose();
   assert.equal(hostNew.hasAttribute('data-dsh-session-tabs-native-hidden'),false,'disposal must restore the host control');
 });
+test('the strip reserves only the width the chrome seat still draws, not the host fixed band',()=>{
+  // Hiding the duplicate `+` left the host's fixed 160px reservation in place, so the strip kept
+  // a dead gap where that button used to be. The inset must follow the seat's live right edge.
+  let seat,frame;
+  const f=mounted(dom=>{
+    frame=dom.doc.createElement('div');
+    frame._rect={left:0,top:0,width:1200,height:600,right:1200,bottom:600};
+    seat=dom.doc.createElement('div');seat.setAttribute('data-shell-leading','');
+    // The seat sits at left:88px and holds the toggle (28px) plus 8px gap plus the 28px New
+    // Session button, so its right edge lands at 88+28+8+28 = 152 before the hide.
+    seat._rect={left:88,top:11,width:64,height:28,right:152,bottom:39};
+    const toggle=dom.doc.createElement('button');
+    const t=dom.doc.createElement('svg');t.append(dom.doc.createElement('path'));t.firstChild.setAttribute('d','M8 1.5V14.5');toggle.append(t);
+    const hostNew=dom.doc.createElement('button');
+    const b=dom.doc.createElement('svg');b.append(dom.doc.createElement('path'));b.firstChild.setAttribute('d','M8 5V11');hostNew.append(b);
+    seat.append(toggle,hostNew);frame.append(seat);dom.doc.body.append(frame);
+  });
+  const host=f.dom.center.firstChild;
+  // The seat still reports its full box, but only the toggle is drawn now, so the reservation is
+  // re-derived from the seat's right edge rather than the host's 160px band.
+  assert.equal(host.style.getPropertyValue('--dsst-leading'),'152px','the inset must come from the seat, not the fixed clearance');
+  // The padding rule prefers the measured inset over the host value.
+  const css=[...f.dom.doc.querySelectorAll('[data-plugin]')].map(n=>n.textContent).join('');
+  assert.match(css,/var\(--dsst-leading,/,'the padding must prefer the measured inset');
+  f.ctx.dispose();
+});
 test('top panel controls relay native clicks, track native state and restore originals',()=>{
   let bottom,right,other,bottomClicks=0,rightClicks=0;
   const f=mounted(dom=>{

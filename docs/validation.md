@@ -75,6 +75,26 @@ bare svg clone: inline transform ''               computed none   (the old behav
 
 The proxy's own size rule was narrowed to `>svg` so the 16px svg inside a 15px wrapper is no longer inflated by the proxy's button rule. The mock fixture's `cloneNode` now copies `style`, because the real one does — without it the regression could not be asserted. All 52 tests pass, including a new one that fails when only the svg is cloned.
 
+## Fork: leading inset follows the seat (0.1.7-fork.7)
+
+Hiding the host's duplicate New Session button left the strip padding at the host's fixed `--dsh-frame-leading-clearance` (160px, 84px fullscreen), which measures the seat's whole band including the button that is now hidden — hence a visible gap. The strip now derives its own `--dsst-leading` from the seat's live geometry (`seat.right - frame.left`) and its padding rule prefers it:
+
+```css
+padding-inline-start: var(--dsst-leading, var(--dsh-frame-leading-clearance, 0px))
+```
+
+The override is applied only while the strip is the thing on screen. Native mode and a disabled plugin drop it, because leaving it behind would quietly shrink the reservation the host made for its own controls. The seat is also added to the ResizeObserver: its width animates with the sidebar, and a stale inset would show as a gap that grows and shrinks on its own.
+
+Measured in a real Chromium with the seat in its native shape and the real bundle loaded:
+
+```
+strip enabled:    seatWidth 32   padding-inline-start 112px  (--dsst-leading 112px)
+strip disabled:   seatWidth 72   padding-inline-start 0px    (override removed)
+strip re-enabled: seatWidth 32   padding-inline-start 112px
+```
+
+All 43 tests pass. The new regression asserts the inset comes from the seat rather than the fixed 160px; it fails if the measurement is dropped. The mock fixture's `style` became a CSSOM proxy and `cloneNode` copies inline properties explicitly — a bare object threw on `setProperty`, and `{...style}` could not see the properties stored inside the proxy.
+
 ## Fork: duplicate `+` suppressed (0.1.7-fork.6)
 
 On macOS with the sidebar collapsed, `ui-layout` mounts the frame's `shell.leading` seat (`darwin && sidebarCollapsed`) at `top:11px; left:88px`, and `ui-sidebar`'s `HeaderLeadingControls` occupies it with two buttons: sidebar-toggle and New Session. The strip pads itself by the published `--dsh-frame-leading-clearance` (160px) so it clears that seat — which put the host's New Session button and the strip's own `+` in the same row, both calling `uiWorkspace.startSession()`.
