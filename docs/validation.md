@@ -29,7 +29,11 @@ node --test test/verify.mjs
 
 CI runs this suite on Ubuntu, Windows and macOS with Node 22 and 24. This matrix checks plugin logic; it does not imply GUI acceptance on every operating system.
 
-## Scroll-restoration correction and macOS check (0.1.5)
+## Scroll-restoration correction and macOS check (0.1.5) — superseded
+
+> The scroll memory described in this section was removed in 0.1.7-fork.4; the host owns
+> session scroll position itself (see "Fork: scroll memory removed" below). The checks are
+> kept as a record of what was verified at the time.
 
 - All 42 tests pass locally, including a clamped first attempt followed by temporarily unchanged history height and later content growth. Virtual time advances through individual retries rather than flushing all timers before the content changes.
 - Wheel, touch, pointer and scrolling-key input cancel restoration before its first attempt or between retries. Composer/IME input is excluded; width-control wheel forwarding is included. Unobserved scroll-position changes also stop retries.
@@ -71,20 +75,19 @@ bare svg clone: inline transform ''               computed none   (the old behav
 
 The proxy's own size rule was narrowed to `>svg` so the 16px svg inside a 15px wrapper is no longer inflated by the proxy's button rule. The mock fixture's `cloneNode` now copies `style`, because the real one does — without it the regression could not be asserted. All 52 tests pass, including a new one that fails when only the svg is cloned.
 
-## Fork: tail-following on session return (0.1.7-fork.3)
+## Fork: scroll memory removed (0.1.7-fork.4)
 
-Returning to a session used to restore its remembered `scrollTop`, even when the reader had left it at the tail. Because a background session keeps growing, that absolute offset parked the view above the newest message — the reader had to scroll down again. The plugin was keeping a second, pixel-based scroll memory on top of the host's own semantic policy (`ui-chat`'s `followingTail`, which saves `null` instead of a position at the tail).
+The plugin's own scroll memory is gone. It was a second, pixel-based memory layered on top of the host's semantic policy, and it caused the "returning to a session shows an old position instead of the newest message" report: a background session keeps growing, so the remembered absolute `scrollTop` lands above the newest message.
 
-Capture now records intent as well as position: `{top, atTail}`, with `atTail` using the same 25 px threshold the host's `ScrollFollow` uses. A tail departure resolves to the live tail (`scrollHeight - clientHeight`) on every retry; a mid-history departure restores the exact offset. Legacy numeric entries still restore as plain offsets.
+The host already handles this correctly on its own, which the removed code was masking:
 
-Measured in a real Chromium against the real bundle, with the transcript grown while the session was in the background:
+- A session switch remounts the chat view — `StrictSessionEntry` keys the subtree by `sessionGenerationKeyOf(binding)`, so component-local state does not survive a switch.
+- `ui-chat` keeps `chatScrollPositions` (a `Map` keyed by `sessionId`) outside the remounted subtree, so the position survives.
+- What it stores is intent, not a coordinate: at the tail it saves `null`, and `ChatReading.restore()` with `saved === null` calls `followTail()`, landing on the *current* tail. Reading history stores a semantic anchor (`capturePosition()`), which is restored by anchor rather than by offset, so content growth does not move the reader.
 
-```
-tail departure, 2000px -> 3200px:  settled tail gap 0.5px   (old code parked at 1500, gap 1200px)
-mid departure (top 400), -> 5043px: settled top 400px       (unchanged)
-```
+Removed with it: the `scrolls` map and the `beforeNavigate`/`afterNavigate` hooks in the controller, the scrollport lookup, the intent listeners, the bounded retry chain, and the 12 tests that asserted that behaviour. Tests went from 54 to 41; the suite is green and no longer claims a scroll contract the plugin does not own.
 
-Both directions matter: asserting only the tail case would have let the reverse bug in, where reading history gets yanked to the bottom. All 54 tests pass; the two new regressions fail against the previous capture/restore.
+What this does not cover: the host behaviour above was established by reading the shipped bundles in `app.asar` (`ui-chat`, `ui-conversation`, `ui-renderer`), not by driving the user's running app, which exposes no debug port. Tab switching was left to be observed in normal use.
 
 
 ## Limits
