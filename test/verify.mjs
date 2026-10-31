@@ -97,6 +97,23 @@ test('reopen and reorder preserve identity and active selection',()=>{
   f.controller.move('c',1);assert.deepEqual(plain(f.controller.snapshot().ids),['a','c','b']);assert.equal(f.controller.move('a',-1),false);
   f.controller.close('a');f.controller.reopen();assert.ok(f.controller.snapshot().ids.includes('a'));f.controller.dispose();
 });
+test('deleting the session on screen starts a fresh blank instead of pointing at the ghost',()=>{
+  // Deleting the current session makes the host clear the main view (`clearMain`), so nothing
+  // holds `mainView` any more and `current(list)` returns null while the host still renders an
+  // empty 新会话 page. That page is not a session, so no tab could point at it; the strip asks
+  // for a real blank, which both selects itself and matches what the host is showing.
+  const f=fixture({raw:'{"version":1,"ids":["a","b","c"],"active":"a"}'});
+  delete f.list.value.byId.a;f.list.emit();
+  assert.equal(f.calls.some(c=>c[0]==='new'),true,'the sessionless page must be replaced by a real blank');
+  const blank=f.controller.snapshot().active;
+  assert.notEqual(blank,'a','a deleted session must not stay selected');
+  assert.equal(f.list.value.byId[blank].blank,true);
+  assert.equal(f.controller.snapshot().ids.includes(blank),true,'the fresh blank earns its tab');
+  assert.deepEqual(plain(f.controller.snapshot().ids).filter(id=>!id.startsWith('new')),['b','c']);
+  // One blank per deletion, not a cascade: the synchronous list publish re-enters sync.
+  assert.equal(f.calls.filter(c=>c[0]==='new').length,1,'a re-entrant sync must not ask for another blank');
+  f.controller.dispose();
+});
 test('archived session is not navigated; host deletion and archive prune tabs',()=>{
   const f=fixture({raw:'{"version":1,"ids":["a","b","c"],"active":"a"}'});f.workspaces.value.archivedSessionIds=['b'];f.workspaces.emit();
   assert.equal(f.controller.open('b'),false);assert.equal(f.calls.some(c=>c[0]==='open'&&c[1]==='b'),false);

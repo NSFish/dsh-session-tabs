@@ -75,6 +75,26 @@ bare svg clone: inline transform ''               computed none   (the old behav
 
 The proxy's own size rule was narrowed to `>svg` so the 16px svg inside a 15px wrapper is no longer inflated by the proxy's button rule. The mock fixture's `cloneNode` now copies `style`, because the real one does — without it the regression could not be asserted. All 52 tests pass, including a new one that fails when only the svg is cloned.
 
+## Fork: deleting the current session (0.1.7-fork.8)
+
+Deleting the session on screen goes through `dsh-session-manager`, which calls `uiWorkspace.clearMain()` after a successful delete. That drops the `mainView` retention, so `current(list)` returns `null` while the host still renders an empty 新会话 page. The strip had two problems at once: `sync` bailed out because there was no current session, and `lastMain` still pointed at the deleted id — so the row neither added nor pruned anything, and closing/arrow-key logic kept targeting a session that no longer existed.
+
+Both are fixed in `sync`:
+
+- When `!id && lastMain && !list.byId[lastMain]`, the stale selection is cleared first.
+- Then the plugin asks the host for a real blank (`startBlank`), so the row and the page agree: the strip selects a tab and the host renders the same draft, instead of a page with no session behind it.
+
+`startSession` publishes the new session list synchronously and re-enters `sync`, so `pendingNew` guards the call: without it a single delete would chain several blanks.
+
+Measured in a real Chromium against the real bundle, deleting the active session `a`:
+
+```
+before: ids ["a","b","c"]   active a
+after:  ids ["b","c","blank1"]   active blank1 (blank === true)   tabs 3
+```
+
+`DELETED_SESSION_NOT_SELECTED`, `FRESH_BLANK_HAS_TAB` and `NO_CASCADE` all hold. All 44 tests pass; the regression fails against the previous behaviour, where `active` stayed on the deleted id.
+
 ## Fork: leading inset follows the seat (0.1.7-fork.7)
 
 Hiding the host's duplicate New Session button left the strip padding at the host's fixed `--dsh-frame-leading-clearance` (160px, 84px fullscreen), which measures the seat's whole band including the button that is now hidden — hence a visible gap. The strip now derives its own `--dsst-leading` from the seat's live geometry (`seat.right - frame.left`) and its padding rule prefers it:
