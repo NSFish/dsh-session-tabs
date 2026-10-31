@@ -75,6 +75,30 @@ bare svg clone: inline transform ''               computed none   (the old behav
 
 The proxy's own size rule was narrowed to `>svg` so the 16px svg inside a 15px wrapper is no longer inflated by the proxy's button rule. The mock fixture's `cloneNode` now copies `style`, because the real one does — without it the regression could not be asserted. All 52 tests pass, including a new one that fails when only the svg is cloned.
 
+## Fork: `+` earns a tab again (0.1.7-fork.5)
+
+The 0.1.7-fork.1 rule ("a tab is earned, not granted") was right about automatic blank tabs and wrong about the explicit `+`. It hid the fresh 新会话 tab too, so pressing `+` looked like a no-op until the first message was sent. `shown()` now also accepts the blank while it is the session on screen:
+
+```js
+if (id === lastMain) return true;   // the reader pressed `+`, so this blank is wanted
+```
+
+Two ordering consequences, both load-bearing:
+
+- `sync()` must adopt the new main view (`lastMain = id`) *before* pruning, because `shown()` reads `lastMain`. Pruning first judged the fresh blank against the session it replaced and retired it in the same pass that created it.
+- An unused blank is retired when the reader switches away; a blank that produced work (`running`/`pending`, or no longer `blank`) keeps its tab.
+
+Verified in a real Chromium against the real bundle, with a `startSession` stub that mirrors the host (connect a blank, then navigate to it):
+
+```
+at rest:                      ids ["a","b","c"]
+after +:                      ids ["a","b","c","blank1"]   active blank1
+after switching to b:         ids ["a","b","c"]            blank1 retired
+worked blank, switch away:    ids ["a","b","c","blank2"]   blank2 kept
+```
+
+All 41 tests pass. Five assertions were rewritten to the new contract — they failed first, which is the correct failure, not a regression to work around.
+
 ## Fork: scroll memory removed (0.1.7-fork.4)
 
 The plugin's own scroll memory is gone. It was a second, pixel-based memory layered on top of the host's semantic policy, and it caused the "returning to a session shows an old position instead of the newest message" report: a background session keeps growing, so the remembered absolute `scrollTop` lands above the newest message.

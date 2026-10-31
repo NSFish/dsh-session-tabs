@@ -87,10 +87,10 @@ test('close active selects a neighbour; final close creates a blank without read
   f.controller.close('a');assert.ok(f.controller.snapshot().active.startsWith('new'));assert.equal(f.controller.snapshot().ids.includes('a'),false);f.controller.dispose();
 });
 test('new command reopens a closed blank even when native startSession reuses it',()=>{
-  // A blank tab is never shown, so `+` must still land on it: the reopen path navigates to the
-  // reused blank and the strip stays unselected until that session produces work.
+  // The reused blank becomes the main view, so it earns its tab back immediately: `+` must
+  // visibly do something, not silently leave the strip unchanged.
   const f=fixture();f.list.value.byId.a.blank=true;f.controller.close('a');assert.equal(f.controller.snapshot().ids.length,0);
-  f.services.uiWorkspace.startSession=()=>{};f.controller.newSession();assert.deepEqual(plain(f.controller.snapshot().ids),[]);assert.equal(f.controller.snapshot().active,'a');f.controller.dispose();
+  f.services.uiWorkspace.startSession=()=>{};f.controller.newSession();assert.deepEqual(plain(f.controller.snapshot().ids),['a']);assert.equal(f.controller.snapshot().active,'a');f.controller.dispose();
 });
 test('reopen and reorder preserve identity and active selection',()=>{
   const f=fixture();f.controller.open('b');f.controller.open('c');f.controller.reorder('c','a');assert.deepEqual(plain(f.controller.snapshot().ids),['c','a','b']);
@@ -193,8 +193,8 @@ test('status, title and selection updates preserve tab nodes and focused control
   assert.equal(host.querySelector('[data-dsst-id="a"]'),a);assert.equal(f.dom.doc.activeElement,a);
   f.list.value.byId.a.displayTitle='renamed';f.list.emit();f.dom.flush();assert.equal(a.textContent.includes('renamed'),true);
   host.dispatch('click',{target:plus});assert.equal(host.querySelector('[data-dsst-id="a"]'),a);
-  // `+` opens a blank session: the strip must keep its node set instead of minting an empty tab.
-  assert.equal(host.querySelector('[data-dsst-action="new"]'),plus);assert.equal(host.querySelectorAll('[data-dsst-tab]').length,1);
+  // `+` opens a blank session, which earns a tab of its own while it is on screen.
+  assert.equal(host.querySelector('[data-dsst-action="new"]'),plus);assert.equal(host.querySelectorAll('[data-dsst-tab]').length,2);
   assert.equal(f.window.__dshSessionTabs.snapshot().active.startsWith('new'),true);
   f.ctx.dispose();
 });
@@ -202,7 +202,7 @@ test('removing options keeps native fallback and strip-local reopen, with IME gu
   const f=mounted(),host=f.dom.center.firstChild,plus=host.querySelector('[data-dsst-action="new"]');
   assert.equal(host.querySelector('[data-dsst-action="menu"]'),null);assert.equal(f.ctx.registrations[0].meta.id,'dsh-session-tabs:mode');
   host.dispatch('click',{target:plus});const blank=f.window.__dshSessionTabs.snapshot().active;
-  assert.equal(f.window.__dshSessionTabs.snapshot().ids.includes(blank),false,'a blank session must not earn a tab');
+  assert.equal(f.window.__dshSessionTabs.snapshot().ids.includes(blank),true,'`+` must earn a tab while the blank is on screen');
   // Close a real tab, then confirm the strip still owns the reopen shortcut for it.
   const real=f.window.__dshSessionTabs.snapshot().ids[0];
   host.dispatch('click',{target:host.querySelectorAll('[data-dsst-action="close"]').find(b=>b.getAttribute('data-dsst-id')===real)});
@@ -300,17 +300,17 @@ test('native panel sources ignore hidden retained session headers',()=>{
   });
   const host=f.dom.center.firstChild;host.dispatch('click',{target:host.querySelector('[data-dsst-action="right"]')});assert.equal(right,1);assert.equal(wrong,0);f.ctx.dispose();
 });
-test('a blank new session never earns a tab, and a discarded one is never resurrected',()=>{
+test('`+` earns a tab at once, and an unused blank is retired on the next switch',()=>{
   const f=fixture({raw:'{"version":1,"enabled":true,"ids":["a","b"],"active":"a"}'});
-  // `+` navigates to a blank session: no tab, but the strip still tracks it as the main view.
+  // `+` navigates to a blank session: it is on screen, so the tab appears in the same sync.
   f.services.uiWorkspace.startSession();f.controller.sync();
-  const blank=f.controller.snapshot().active;assert.equal(f.controller.snapshot().ids.includes(blank),false);
+  const blank=f.controller.snapshot().active;assert.equal(f.controller.snapshot().ids.includes(blank),true,'`+` must produce a tab');
   assert.equal(f.list.value.byId[blank].blank,true);
-  // Abandoning it (navigating elsewhere) leaves nothing behind, and no later sync revives it.
+  // Abandoning it (navigating elsewhere) retires the unused blank, and no later sync revives it.
   f.controller.open('b');assert.deepEqual(plain(f.controller.snapshot().ids),['a','b']);
   delete f.list.value.byId[blank];f.list.emit();
   assert.equal(f.controller.snapshot().ids.includes(blank),false);
-  // First message out: the session stops being blank and only then takes its place in the strip.
+  // A blank that produced work keeps its tab even after the reader moves away.
   f.list.value.byId.a.blank=true;f.status.value.set('a',{running:true});f.status.emit();
   assert.equal(f.controller.snapshot().ids.includes('a'),true,'work in progress must keep its tab');
   f.controller.dispose();
@@ -323,7 +323,7 @@ test('blank-session retain never loops: one retain per sync, none for the on-scr
   // Several unrelated notifications must not churn a retain/release cycle for the blank session.
   const before=retains;for(let i=0;i<5;i++)f.list.emit();
   assert.equal(retains-before<=1,true,'a retained blank must not be re-retained on every notification');
-  assert.equal(f.controller.snapshot().ids.includes(blank),false);
+  assert.equal(f.controller.snapshot().ids.includes(blank),true,'the on-screen blank keeps its tab');
   f.controller.dispose();
 });
 test('pointer drag reorders live and a travelled press never selects',()=>{
