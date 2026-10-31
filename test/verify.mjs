@@ -182,9 +182,9 @@ test('replacing chat with a global panel does not create a hidden-attribute obse
     assert.equal(host.hidden,false);assert.equal(old.hasAttribute('data-dsh-session-tabs-main'),true);
   }finally{f.ctx.dispose();}
 });
-function scrollScenario({height=2000,remembered=400}={}){
+function scrollScenario({height=2000,remembered=400,startHeight=2000}={}){
   const f=mounted(),dom=f.dom,host=dom.center.firstChild;
-  const port=dom.doc.createElement('div');port.setAttribute('data-conversation-scroll','');port.scrollHeight=2000;port.clientHeight=500;
+  const port=dom.doc.createElement('div');port.setAttribute('data-conversation-scroll','');port.scrollHeight=startHeight;port.clientHeight=500;
   let top=0;const writes=[];
   // Browsers clamp a restore while history is shorter than the viewport plus remembered offset.
   Object.defineProperty(port,'scrollTop',{get:()=>top,set:value=>{top=Math.max(0,Math.min(Number(value)||0,Math.max(0,port.scrollHeight-port.clientHeight)));writes.push({time:dom.time,top});}});
@@ -271,6 +271,23 @@ test('restoration stops after a bounded wait when history never grows',()=>{
     f.dom.advance(3000);assert.equal(f.port.scrollTop,100);assert.equal(f.dom.timers.size,0,'short content must not leave a permanent retry chain');
     const count=f.writes.length;f.port.scrollHeight=2000;f.dom.advance(10000);
     assert.equal(f.writes.length,count,'timed-out restoration must not resume itself');assert.equal(f.port.scrollTop,100);
+  }finally{f.ctx.dispose();}
+});
+test('a reader who left at the tail lands on the new tail after the session grows in the background',()=>{
+  // The reported bug: leaving a session while it shows the newest message, then coming back
+  // after it has grown, used to restore the old pixel offset and park the view above the newest
+  // message. A tail departure is "follow the newest content", not "return to this offset".
+  const f=scrollScenario({startHeight:2000,remembered:1500,height:3200});try{
+    f.dom.advance(2500);
+    assert.equal(f.port.scrollTop,2700,'the tail moved to 3200-500; the view must land there, not at the old 1500');
+    assert.equal(f.port.scrollHeight-f.port.clientHeight-f.port.scrollTop,0,'no residual gap below the newest message');
+  }finally{f.ctx.dispose();}
+});
+test('a reader who left mid-history keeps the exact offset, even after the session grew',()=>{
+  // The other half of the contract: reading history is a real position worth preserving.
+  const f=scrollScenario({startHeight:2000,remembered:400,height:3200});try{
+    f.dom.advance(2500);
+    assert.equal(f.port.scrollTop,400,'a mid-history position must survive content growth unchanged');
   }finally{f.ctx.dispose();}
 });
 test('switching sessions, native view and disposal cancel outstanding restoration',()=>{

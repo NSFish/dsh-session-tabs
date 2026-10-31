@@ -71,6 +71,21 @@ bare svg clone: inline transform ''               computed none   (the old behav
 
 The proxy's own size rule was narrowed to `>svg` so the 16px svg inside a 15px wrapper is no longer inflated by the proxy's button rule. The mock fixture's `cloneNode` now copies `style`, because the real one does — without it the regression could not be asserted. All 52 tests pass, including a new one that fails when only the svg is cloned.
 
+## Fork: tail-following on session return (0.1.7-fork.3)
+
+Returning to a session used to restore its remembered `scrollTop`, even when the reader had left it at the tail. Because a background session keeps growing, that absolute offset parked the view above the newest message — the reader had to scroll down again. The plugin was keeping a second, pixel-based scroll memory on top of the host's own semantic policy (`ui-chat`'s `followingTail`, which saves `null` instead of a position at the tail).
+
+Capture now records intent as well as position: `{top, atTail}`, with `atTail` using the same 25 px threshold the host's `ScrollFollow` uses. A tail departure resolves to the live tail (`scrollHeight - clientHeight`) on every retry; a mid-history departure restores the exact offset. Legacy numeric entries still restore as plain offsets.
+
+Measured in a real Chromium against the real bundle, with the transcript grown while the session was in the background:
+
+```
+tail departure, 2000px -> 3200px:  settled tail gap 0.5px   (old code parked at 1500, gap 1200px)
+mid departure (top 400), -> 5043px: settled top 400px       (unchanged)
+```
+
+Both directions matter: asserting only the tail case would have let the reverse bug in, where reading history gets yanked to the bottom. All 54 tests pass; the two new regressions fail against the previous capture/restore.
+
 
 ## Limits
 
