@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.7-fork.9 — 2026-11-01
+
+- **启动时默认收起左侧栏。** 宿主的左栏宽度只存在内存里（`ui-layout` 的 store `init` 写死 `sidebar: 280`），刷新就重置，而且没有任何设置项能改——它对外只暴露一个 `ctx.layout.toggleSidebar()`，是「盲切换」，既不能指定方向也读不到状态。所以这件事只能由插件在启动时做一次。
+- 新增偏好 `dsh-session-tabs.prefs.v1`（独立 key，不与标签列表混存：一个是「窗口怎么开」，一个是「记住哪些会话」，坏掉互不牵连），字段 `collapseSidebar`，默认 `false`（保持宿主行为）。解析全程防御式：值不可用一律回落到默认，不阻塞启动。
+- 判定依据是框架的 `data-sidebar-collapsed` 标记（宿主只在**收起**时打这个属性，没有就是展开），而不是靠猜。因此只在列真的开着时才消耗一次 toggle；列已经收着（窄屏、或者读者手快先点了）就什么都不做。这样即使插件被二次 apply（live patch reload / HMR），也不会把已经收起的列又翻回去。
+- 框架是异步提交的，启动那一刻可能还没有它。此时**不**当作「展开」（那会盲切一次），而是按 50ms 一轮、最多 40 轮的重试等它落地；卸载时清理该定时器。「本次加载只折叠一次」的标志挂在 `window` 上（`__dshSessionTabsBootCollapsed`），既不是模块作用域也不是 install 作用域：live patch reload 会把整个 bundle 重新求值、模块作用域归零，install 作用域同样会归零，两种位置都会让第二次 apply 把读者刚打开的列又收回去。
+- 侧栏底部加了一个开关（`dsh-session-tabs:boot`，紧挨原生的标签/原生视图切换），因为宿主没有对应设置项，没有这个控件的话这个偏好就只有开发者能改。打开时立即生效（收起列），关闭时只忘记意图、不动当前列。
+- 真实 Chromium（Edge headless + 真实 DOM + CDP）验证：偏好开 → 启动后 `data-sidebar-collapsed` 存在、`toggleSidebar` 恰好被调 1 次、标签栏和样式各 1 份、无异常；刷新后仍然只调 1 次；偏好关 → 一次都不调、列保持展开。49 条测试全绿。
+- 测试夹具补了三处：暴露 `frame`、给 `layout` 加 `toggleSidebar`、把 `localStorage` 始终接成 fixture 的 map（原来只在 seed 标签时才接，偏好写入会被静默丢弃）。
+
 ## 0.1.7-fork.8 — 2026-10-31
 
 - **删除当前会话后，标签栏和页面对不上了。** 删除当前会话时，宿主（`dsh-session-manager`）会调 `uiWorkspace.clearMain()` 清空主视图，于是 `current(list)` 返回 `null`；但插件里 `lastMain` 仍指着那个已被删掉的 id，`sync` 又因为「没有当前会话」直接跳过更新——结果页面停在空白的「新会话」页，标签栏既不新增也不清空，而且内部还选中着一个已经不存在的会话（关标签、方向键换标签都会打向这个幽灵）。

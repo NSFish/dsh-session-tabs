@@ -24,12 +24,13 @@ function fixture(opts={}){
   const list=new Observable({phase:opts.phase||'ready',ids:['a','b','c'],byId:{a:{id:'a',displayTitle:'A',blank:false,running:false,retainedBy:{mainView:1}},b:{id:'b',displayTitle:'B',blank:false,running:false,retainedBy:{}},c:{id:'c',displayTitle:'C',blank:false,running:false,retainedBy:{}}}});
   const status=new Observable(new Map()),workspaces=new Observable({items:[],archivedSessionIds:[]}),panel=new Observable({activePanelId:null});
   const calls=[],refs=[],values=new Map();if(opts.raw)values.set(plugin.storageKey,opts.raw);
+  if(opts.prefs)values.set('dsh-session-tabs.prefs.v1',JSON.stringify({version:1,...opts.prefs}));
   const storage={getItem:k=>values.get(k)||null,setItem:(k,v)=>{values.set(k,v);}};
   const services={sessions:{list,retain(id,options){
     calls.push(['retain',id,options.source]);
     const r={id,released:false,ready:opts.rejectReady?Promise.reject(new Error('open failed')):Promise.resolve(),release(){if(r.released)return;r.released=true;const row=list.value.byId[id];if(row){delete row.retainedBy[options.source];list.emit();}}};refs.push(r);
     list.value.byId[id].retainedBy[options.source]=1;list.emit();return r;
-  }},uiSession:{sessionStatus:status},workspaces:{list:workspaces},layout:{panelInfo:panel},uiWorkspace:{
+  }},uiSession:{sessionStatus:status},workspaces:{list:workspaces},layout:{panelInfo:panel,toggleSidebar(){calls.push(['toggleSidebar']);}},uiWorkspace:{
     openSession(id){if(opts.failOpen)throw new Error('navigation failure');calls.push(['open',id]);Object.values(list.value.byId).forEach(row=>delete row.retainedBy.mainView);list.value.byId[id].retainedBy.mainView=1;list.emit();},
     startSession(){calls.push(['new']);if(opts.noCreate)return;const id='new'+calls.length;list.value.byId[id]={id,displayTitle:'new',blank:true,retainedBy:{}};services.uiWorkspace.openSession(id);}
   }};
@@ -145,9 +146,13 @@ test('implementation forbids client cloning, sidebar replacement, global keys an
   const {plugin}=load();assert.doesNotMatch(plugin.CSS,/[A-Za-z0-9_]{6,}_(?:root|header|frame)/);assert.match(plugin.CSS,/-webkit-app-region:no-drag/);
 });
 function mounted(setup,opts){const f=fixture(opts);f.controller.dispose();const dom=domFixture();
-  // The strip reads window.localStorage; when a test seeds remembered tabs, back the DOM's
-  // storage with the fixture's map so the plugin sees them at mount time.
-  if(opts&&opts.raw)dom.extra.window.localStorage={getItem:k=>f.values.get(k)||null,setItem:(k,v)=>{f.values.set(k,v);}};
+  // The strip reads window.localStorage. Back the DOM's storage with the fixture's map always,
+  // not only when a test seeds tabs: the start-up preference is written through the same object,
+  // and a no-op stub would silently drop it.
+  dom.extra.window.localStorage={getItem:k=>f.values.get(k)||null,setItem:(k,v)=>{f.values.set(k,v);}};
+  // The layout service's toggle is the host's only lever for the left column: model it against
+  // the frame marker the plugin reads back, so a test can assert both halves of the contract.
+  if(opts&&opts.frameToggle)f.services.layout.toggleSidebar=()=>{f.calls.push(['toggleSidebar']);dom.frame.toggleSidebar?.();};
   setup?.(dom);const {plugin,window}=load(dom.extra);const ctx=new TestContext(f.services,plugin.inject);plugin.apply(ctx);dom.flush();return {...f,dom,plugin,window,ctx};}
 test('actual apply mounts only the center and leaves both native sidebar nodes intact',()=>{
   const f=mounted();assert.equal(f.dom.center.firstChild.getAttribute('data-dsh-session-tabs'),'');assert.equal(f.dom.native.getAttribute('data-dsh-session-tabs-main'),'');
@@ -348,6 +353,83 @@ test('native panel attributes win over a stale opener and update without a tab r
   panel.setAttribute('data-sidebar-right-open','');f.dom.observers[0].fn([{type:'attributes',target:panel,attributeName:'data-sidebar-right-open'}]);
   assert.equal(proxy.hidden,true,'attribute handoff must sync immediately, before timers');
   assert.equal(expand.hasAttribute('data-dsh-session-tabs-native-hidden'),true,'stale native opener must not flash back');f.ctx.dispose();
+});
+test('start-up collapse preference is parsed defensively and defaults to the host behaviour',()=>{
+  const {plugin}=load();
+  // Any unusable value falls back to "expanded": the host's own default, not an error.
+  for(const raw of [null,undefined,'{','[]','{"version":2,"collapseSidebar":true}','{"version":1,"collapseSidebar":"yes"}'])assert.equal(plugin.parsePrefs(raw).collapseSidebar,false,'raw: '+raw);
+  assert.equal(plugin.parsePrefs('{"version":1,"collapseSidebar":true}').collapseSidebar,true);
+  assert.equal(plugin.parsePrefs({version:1,collapseSidebar:true}).collapseSidebar,true);
+  assert.equal(plugin.parsePrefs(plugin.serialPrefs({version:1,collapseSidebar:true})).collapseSidebar,true);
+});
+test('boot collapse toggles an open column exactly once, and never re-collapses after a reload',()=>{
+  // The host keeps the left column's width in memory only (`ui-layout`'s store `init` hard-codes
+  // `sidebar: 280`), so every page load re-expands it and there is no setting to change that.
+  // `ctx.layout.toggleSidebar()` is the only lever, and it is a blind toggle — so the plugin
+  // reads the frame's `data-sidebar-collapsed` marker (absent = open) and toggles at most once.
+  let toggles=0;
+  const f=mounted(dom=>{
+    // Model the host: the toggle flips the marker, and an open column is the boot state.
+    dom.frame.toggleSidebar=()=>{toggles++;if(dom.frame.hasAttribute('data-sidebar-collapsed'))dom.frame.removeAttribute('data-sidebar-collapsed');else dom.frame.setAttribute('data-sidebar-collapsed','');};
+  },{prefs:{collapseSidebar:true},frameToggle:true});
+  assert.equal(toggles,1,'an open column must be collapsed on boot');
+  assert.equal(f.dom.frame.hasAttribute('data-sidebar-collapsed'),true,'the marker must reflect the toggle');
+  // A live patch reload re-applies the plugin: the column is now collapsed, so the second apply
+  // must not spend another toggle (that would re-open it).
+  f.plugin.apply(f.ctx);f.dom.flush();
+  assert.equal(toggles,1,'a second apply must not toggle again');
+  // A live patch reload re-evaluates the WHOLE bundle, resetting module scope. The marker must
+  // therefore live on `window` — if it were module-scoped, a reload after the reader had opened
+  // the column by hand would collapse it again.
+  const reloaded=load(f.dom.extra);reloaded.plugin.apply(f.ctx);f.dom.flush();
+  assert.equal(toggles,1,'a full bundle re-evaluation must not toggle again');
+  assert.equal(f.window.__dshSessionTabsBootCollapsed,true,'the marker must survive module re-evaluation');
+  f.ctx.dispose();
+});
+test('boot collapse is skipped when the column is already shut, and off by default',()=>{
+  let toggles=0;
+  const f=mounted(dom=>{
+    dom.frame.setAttribute('data-sidebar-collapsed','');
+    dom.frame.toggleSidebar=()=>{toggles++;dom.frame.removeAttribute('data-sidebar-collapsed');};
+  },{prefs:{collapseSidebar:true},frameToggle:true});
+  // Already collapsed (narrow viewport, or the reader's own click beat the plugin): the
+  // preference is already satisfied, so no toggle is spent — and crucially none is wasted on
+  // turning it back ON.
+  assert.equal(toggles,0,'an already-collapsed column must not be toggled');
+  f.ctx.dispose();
+  const off=mounted(dom=>{dom.frame.toggleSidebar=()=>{toggles++;};},{frameToggle:true});
+  assert.equal(toggles,0,'the preference defaults to the host behaviour (expanded)');
+  assert.equal(off.window.__dshSessionTabs.snapshot().prefs.collapseSidebar,false);
+  off.ctx.dispose();
+});
+test('boot collapse waits for a frame that commits late instead of toggling blind',()=>{
+  // React commits the frame in the same pass that mounts the plugin, but a boot that measured
+  // before it landed would see no frame at all. Treating that as "expanded" would spend a
+  // toggle on a column nobody had seen yet; the boot retry waits for the frame to land.
+  let toggles=0;let frame,root;
+  const f=mounted(dom=>{
+    frame=dom.frame;root=dom.doc.querySelector('#root');
+    frame.toggleSidebar=()=>{toggles++;frame.setAttribute('data-sidebar-collapsed','');};
+    frame.remove(); // the first pass sees no frame
+    // The boot retry runs on the fixture's virtual clock, so the frame has to land on that clock
+    // too — a real setTimeout here would still be pending when `flush()` drains the virtual queue.
+    dom.extra.setTimeout(()=>root.append(frame),60);
+  },{prefs:{collapseSidebar:true},frameToggle:true});
+  f.dom.flush();
+  assert.equal(toggles,1,'the late frame must be collapsed once it lands');
+  assert.equal(frame.hasAttribute('data-sidebar-collapsed'),true,'the marker must reflect the toggle');
+  f.ctx.dispose();
+});
+test('the footer toggle writes the preference and applies it immediately',()=>{
+  const f=mounted();
+  const slot=f.ctx.registrations.find(r=>r.meta.id==='dsh-session-tabs:boot');
+  assert.ok(slot,'the start-up toggle must be registered in the sidebar footer');
+  // The host exposes no setting for this, so the control is the only way to change it.
+  assert.equal(slot.meta.name,'sidebar.footer.action');
+  assert.equal(f.window.__dshSessionTabs.snapshot().prefs.collapseSidebar,false);
+  assert.equal(f.window.__dshSessionTabs.collapseOnStart(true),true,'the preference must be writable');
+  assert.equal(f.values.get('dsh-session-tabs.prefs.v1'),'{"version":1,"collapseSidebar":true}','it must persist');
+  f.ctx.dispose();
 });
 test('collapse handoff reserves the right slot and disables only its placeholder until the native opener returns',()=>{
   let expand,panel,bottomClicks=0;

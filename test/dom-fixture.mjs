@@ -87,7 +87,7 @@ export function domFixture(){
   const flush=()=>{for(let i=0;timers.size&&i<100;i++)advance(Math.max(0,Math.min(...[...timers.values()].map(task=>task.at))-time));if(timers.size)throw Error('timer loop');};
   // Input tests dispatch through the real ancestor path so delegated capture listeners see it.
   const dispatch=(target,type,props={})=>{const event={target,type,preventDefault(){},...props},path=[];for(let n=target;n;n=n.parentNode)path.push(n);if(!path.includes(doc))path.push(doc);path.push(window);for(const node of path.reverse())node.dispatch(type,event);return event;};
-  return {extra,doc,window,left,right,center,main,native,timers,observers,flush,advance,dispatch,get time(){return time;}};
+  return {extra,doc,window,left,right,center,main,native,frame,timers,observers,flush,advance,dispatch,get time(){return time;}};
 }
 export class TestContext{
   constructor(services,inject){this.cleanups=[];this.registrations=[];this.warnings=[];this.logger={warn:message=>this.warnings.push(message)};

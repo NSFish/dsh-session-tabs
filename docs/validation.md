@@ -180,6 +180,21 @@ Removed with it: the `scrolls` map and the `beforeNavigate`/`afterNavigate` hook
 What this does not cover: the host behaviour above was established by reading the shipped bundles in `app.asar` (`ui-chat`, `ui-conversation`, `ui-renderer`), not by driving the user's running app, which exposes no debug port. Tab switching was left to be observed in normal use.
 
 
+## Fork: start-up sidebar collapse (0.1.7-fork.9)
+
+The host keeps the left column's width in memory only: `ui-layout`'s store `init` hard-codes `sidebar: 280`, and its README lists "panel geometry is transient state — a reload restores the sidebar defaults" as a known limitation. There is no setting for it. The only lever the layout service exposes is `ctx.layout.toggleSidebar()`, a blind toggle with no direction argument and no readable state, so the plugin cannot ask the host whether the column is open.
+
+The decision therefore comes from the DOM. `AppFrame` publishes `data-sidebar-collapsed` on its grid container whenever the column is shut (on narrow viewports that means "rail not expanded"), and leaves it off otherwise, so the attribute's presence is a truthful "currently collapsed" signal. Two consequences shape the implementation:
+
+- **Absent frame ≠ expanded.** React commits the frame in the same pass that mounts the plugin, but a boot that measures before it lands sees no frame at all. Treating that as "expanded" would spend a toggle on a column nobody had seen. The boot retry polls every 50 ms for up to 40 rounds and stops on dispose; a detached frame (`isConnected === false`) counts as absent for the same reason.
+- **Once per page load, marked on `window`.** The "already decided" flag is `window.__dshSessionTabsBootCollapsed`, not module or install scope. A live patch reload re-evaluates the whole bundle — module scope resets — and an install-scoped flag would also reset. Either would let the second pass collapse a column the reader had already opened by hand. The marker is deliberately left behind on dispose: the claim it records is about this page load, not about this fiber.
+
+Verified in real Chromium (Edge headless, real DOM, CDP-driven) rather than only in the mock DOM. The harness mounted the actual `lib/client.js` against a frame that models the host's toggle by flipping the marker, and asserted: with the preference on, boot calls `toggleSidebar` exactly once, `data-sidebar-collapsed` is present afterwards, one strip and one stylesheet, and no console exceptions; a page reload calls it once again (the host has forgotten the width, so the column genuinely starts open); with the preference off, it is never called and the column stays expanded. All 49 actual-bundle tests pass.
+
+The fixture gained three things the contract needs: `frame` exposed, `layout.toggleSidebar` on the mock service, and `localStorage` always wired to the fixture's map. That last one was a real hole — it used to be stubbed only when a test seeded tabs, so a preference write was silently discarded and the assertion would have passed against a no-op.
+
+What this does not cover: the user's running desktop app exposes no debug port and its Web GUI answered `dsh web authentication required`, so acceptance was done in an isolated Chromium copy of the same page structure, not in the installed application. The marker name (`data-sidebar-collapsed`) and the "absent means expanded" reading are host implementation details, not a public contract; a host upgrade that renames or inverts it would need a plugin update.
+
 ## Limits
 
 The center strip uses the stable `data-slot="main"` hook because DSH has no dedicated public tab-strip slot. Host layout/API changes can require a plugin update. All panels continue using native controls; missing optional native controls remain unavailable.

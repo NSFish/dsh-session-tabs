@@ -30,6 +30,7 @@
 10. 改完必须 `node --test test/verify.mjs` 全绿；真实界面用 `node tools/real-ui-check.mjs --global __dshSessionTabs` 验一次。
 11. 拖拽类改动**不能只靠 mock DOM 验收**：手感（跟手、换位时机）必须在真实浏览器里逐点采样屏幕坐标。别在标签上留 `draggable`——它会让浏览器接管手势并停止派发 `pointermove`。细节见 `docs/lessons-drag-reorder.md`。
 12. 克隆原生控件当图标时，**克隆承载样式的容器，不是 svg 本身**：旋转/位移可能写在外层 wrapper 的 inline style 上（`dsh-better-sidebar` 的底部开关就是 `rotate(-90deg)` 套在 span 上），只克隆 `svg` 会静默丢掉它。改完在真实浏览器里比一次 computed transform。
+13. 启动期行为（目前只有「启动时收起左侧栏」）**必须幂等**：宿主只给 `ctx.layout.toggleSidebar()` 这个盲切换，读不到状态，所以判据是框架的 `data-sidebar-collapsed` 标记（没有 = 展开，且**框架不存在 ≠ 展开**）。「本次加载已折叠过」的标志必须挂在 `window` 上（`__dshSessionTabsBootCollapsed`），不能放模块作用域也不能放 `install()`：live patch reload 会把整个 bundle 重新求值，两种更近的作用域都会归零，第二次 apply 就会把读者刚打开的列又收回去。
 
 更完整的契约、踩坑库与验收清单见 DSH 的 `dsh-plugin-authoring` skill
 （装好之后：DSH 里 `/dsh-plugin-authoring`，Codex 里 `$dsh-plugin-authoring`；
