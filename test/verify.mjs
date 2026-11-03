@@ -292,6 +292,32 @@ test('the strip reserves only the width the chrome seat still draws, not the hos
   assert.match(css,/var\(--dsst-leading,/,'the padding must prefer the measured inset');
   f.ctx.dispose();
 });
+test('the seat glyph keeps its square box while the strip owns the row, and only then',()=>{
+  // The host's seat button is a 28px flex box with no size rule on its own svg. A theme that
+  // forces svg height to auto (or a larger inherited font size) leaves it taller than wide, and
+  // its top edge climbs into the active tab's corner arc — which reads as two icons overlapping
+  // in the corner. The plugin pins the box, but only while it owns the row: native mode must
+  // keep the host's own metrics, so the rule hangs off the column marker that is written exactly
+  // while the strip is on screen.
+  const f=mounted(dom=>{
+    const frame=dom.doc.createElement('div');
+    const seat=dom.doc.createElement('div');seat.setAttribute('data-shell-leading','');
+    const toggle=dom.doc.createElement('button');toggle.append(dom.doc.createElement('svg'));
+    seat.append(toggle);frame.append(seat);dom.doc.body.append(frame);
+  });
+  const {plugin}=f;
+  const rule=plugin.CSS.match(/[^{}]*\[data-shell-leading\][^{]*\{[^}]*\}/);
+  assert.ok(rule,'the seat glyph needs an explicit box');
+  // :has() is the gate, not a class on the host: the seat belongs to the frame, not to the strip,
+  // so the marker has to be read from an ancestor selector.
+  assert.match(rule[0],/:has\(\[data-dsh-session-tabs-column\]\)/,'the pin must be gated on the strip owning the row');
+  assert.match(rule[0],/width:16px/);assert.match(rule[0],/height:16px!important/,'the pin must outrank a theme rule');
+  assert.match(rule[0],/flex:0 0 auto/,'the glyph must not be stretched or shrunk by the flex line');
+  // The gate is live: mounting the strip writes the marker the selector keys off.
+  assert.equal(f.dom.center.hasAttribute('data-dsh-session-tabs-column'),true);
+  f.ctx.dispose();
+  assert.equal(f.dom.center.hasAttribute('data-dsh-session-tabs-column'),false,'disposal must release the gate so native mode keeps the host metrics');
+});
 test('top panel controls relay native clicks, track native state and restore originals',()=>{
   let bottom,right,other,bottomClicks=0,rightClicks=0;
   const f=mounted(dom=>{

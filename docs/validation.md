@@ -95,6 +95,31 @@ after:  ids ["b","c","blank1"]   active blank1 (blank === true)   tabs 3
 
 `DELETED_SESSION_NOT_SELECTED`, `FRESH_BLANK_HAS_TAB` and `NO_CASCADE` all hold. All 44 tests pass; the regression fails against the previous behaviour, where `active` stayed on the deleted id.
 
+## Fork: the seat glyph keeps its square box (0.1.7-fork.10)
+
+Reported as "after I deleted a session, the icons in the top-left corner overlap". The overlap is not between two controls: the seat's sidebar-toggle glyph had grown taller than wide, and its top edge climbed into the active tab's 16px corner arc, so the two shapes read as one smeared mark. Deleting the session on screen has no bearing on it — the strip replaces the sessionless page with a real blank (fork.8), and that fresh tab's corner arc is what the oversized glyph then ran into.
+
+The seat belongs to the frame, but its glyph is a plain svg inside a 28px flex button with no size rule of its own. Anything that forces `height:auto` (a theme's blanket svg rule, a larger inherited font size) leaves the intrinsic 16x16 box to the flex line, which stretches it vertically. The plugin now pins the box:
+
+```css
+html:has([data-dsh-session-tabs-column]) [data-shell-leading] button>svg{
+  width:16px;height:16px!important;flex:0 0 auto}
+```
+
+`:has()` is the gate rather than a class on the host, because the seat is a child of the frame, not of the strip: the selector has to read the strip's marker from an ancestor. The marker `data-dsh-session-tabs-column` is written exactly while the strip is on screen and removed on disposal, so native mode keeps the host's own metrics and no other plugin's icon in the same seat is resized.
+
+Measured in a real Chromium (Edge headless, CDP, macOS frame forced with `data-platform=darwin`, real bundle loaded):
+
+```
+baseline:                 glyph 16x16 at x94 y17   seat right 116   first tab x128   gap 18px
+hostile theme rule:       width:auto;height:auto;flex:1 1 auto        -> still 16x16, unmoved
+hostile !important:       height:auto!important;flex:1 1 auto          -> still 16x16, unmoved
+```
+
+The seat holds exactly two svgs (toggle and New Session); the New Session one is `display:none` from the fork.6 suppression, so no second icon is painted there. All 50 tests pass. The new regression asserts the `:has()` gate, the pinned box and the `flex:0 0 auto`; deleting the rule makes it fail, and the gate's disposal half fails if the marker is left behind.
+
+Acceptance note: the installed desktop app exposes no debug port, so the GUI measurements above ran against the live web seam (`127.0.0.1:60535`) in a separate headless browser. The auth cookie was read from the desktop profile and used once per probe; it was not written to the repository.
+
 ## Fork: leading inset follows the seat (0.1.7-fork.7)
 
 Hiding the host's duplicate New Session button left the strip padding at the host's fixed `--dsh-frame-leading-clearance` (160px, 84px fullscreen), which measures the seat's whole band including the button that is now hidden — hence a visible gap. The strip now derives its own `--dsst-leading` from the seat's live geometry (`seat.right - frame.left`) and its padding rule prefers it:
