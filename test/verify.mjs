@@ -376,9 +376,20 @@ test('native panel attributes win over a stale opener and update without a tab r
     panel=dom.doc.createElement('div');panel.setAttribute('data-sidebar-right-panel','push');panel.setAttribute('data-sidebar-right-session','a');dom.right.append(panel);
   });
   const proxy=f.dom.center.firstChild.querySelector('[data-dsst-action="right"]');assert.equal(proxy.hidden,false);
+  // While the opener is the live foreground control it is better-sidebar's measurement anchor:
+  // it must be ghosted (laid out, invisible) rather than display:none, or that plugin's
+  // blank-session dock measures 0x0 and lands on the traffic lights. Real Chromium check: with
+  // the ghost the dock measured the opener's true rect instead of escaping to (88,4).
+  assert.equal(expand.hasAttribute('data-dsh-session-tabs-native-hidden'),false,'the live opener must not be display:none — better-sidebar measures it');
+  assert.equal(expand.hasAttribute('data-dsh-session-tabs-native-ghost'),true,'the live opener must stay measurable for better-sidebar');
   panel.setAttribute('data-sidebar-right-open','');f.dom.observers[0].fn([{type:'attributes',target:panel,attributeName:'data-sidebar-right-open'}]);
   assert.equal(proxy.hidden,true,'attribute handoff must sync immediately, before timers');
-  assert.equal(expand.hasAttribute('data-dsh-session-tabs-native-hidden'),true,'stale native opener must not flash back');f.ctx.dispose();
+  assert.equal(expand.hasAttribute('data-dsh-session-tabs-native-hidden'),true,'stale native opener must not flash back');
+  // Once the panel is open the corner anchor is the native collapse toggle — left in place by
+  // this plugin — and the dock renders nothing while the panel is open. The ghost must go.
+  assert.equal(expand.hasAttribute('data-dsh-session-tabs-native-ghost'),false,'a stale opener is no anchor; the ghost must go');
+  f.ctx.dispose();
+  assert.equal(expand.hasAttribute('data-dsh-session-tabs-native-ghost'),false,'disposal must release the ghost');
 });
 test('start-up collapse preference is parsed defensively and defaults to the host behaviour',()=>{
   const {plugin}=load();
